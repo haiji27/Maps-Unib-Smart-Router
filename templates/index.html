@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Peta Dijkstra Universitas Bengkulu</title>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+    <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+    <div class="header">
+        Sistem Navigasi Rute Terpendek - Universitas Bengkulu
+    </div>
+
+    <div class="main-container">
+
+        <div class="kontrol-panel">
+
+            <!-- TITIK AWAL -->
+            <div class="input-group">
+                <label for="start">Titik Awal:</label>
+
+                <select id="start">
+                    <option value="" disabled selected>
+                        Pilih lokasi awal...
+                    </option>
+
+                    {% for key, value in locations.items() %}
+                    <option value="{{ key }}">
+                        {{ value.nama }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- TITIK TUJUAN -->
+            <div class="input-group">
+                <label for="end">Lokasi Tujuan:</label>
+
+                <select id="end">
+                    <option value="" disabled selected>
+                        Pilih lokasi tujuan...
+                    </option>
+
+                    {% for key, value in locations.items() %}
+                    <option value="{{ key }}">
+                        {{ value.nama }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- PILIH JAM -->
+            <div class="input-group">
+                <label for="jam">
+                    Pilih Jam Perjalanan:
+                </label>
+
+                <select id="jam">
+                    <option value="7">07:00</option>
+                    <option value="8">08:00</option>
+                    <option value="9">09:00</option>
+                    <option value="10">10:00</option>
+                    <option value="11">11:00</option>
+                    <option value="12">12:00</option>
+                    <option value="13">13:00</option>
+                    <option value="14">14:00</option>
+                    <option value="15">15:00</option>
+                    <option value="16">16:00</option>
+                    <option value="17">17:00</option>
+                    <option value="18">18:00</option>
+                </select>
+            </div>
+
+            <!-- BUTTON -->
+            <button id="btn-cari">
+                Cari Rute Terpendek
+            </button>
+
+            <!-- HASIL -->
+            <div id="info-hasil">
+                Silakan tentukan titik awal dan tujuan kampus UNIB,
+                lalu klik cari rute.
+            </div>
+
+        </div>
+
+        <!-- MAP -->
+        <div id="map"></div>
+
+    </div>
+
+    <script>
+
+        // =====================================================
+        // INISIALISASI MAP
+        // =====================================================
+        const map = L.map('map').setView(
+            [-3.7562, 102.2760],
+            17
+        );
+
+        // =====================================================
+        // GOOGLE HYBRID
+        // =====================================================
+        L.tileLayer(
+            'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+            {
+                attribution: 'Google Hybrid',
+                maxZoom: 20
+            }
+        ).addTo(map);
+
+        // =====================================================
+        // VARIABLE GLOBAL
+        // =====================================================
+        let penandaAwal = null;
+        let penandaAkhir = null;
+        let routingKontrolAktif = null;
+
+        // =====================================================
+        // FUNGSI CARI RUTE
+        // =====================================================
+        async function cariRute() {
+
+            const start = document.getElementById('start').value;
+            const end = document.getElementById('end').value;
+            const jam = parseInt(
+                document.getElementById('jam').value
+            );
+
+            const infoBox =
+                document.getElementById('info-hasil');
+
+            // VALIDASI
+            if (!start || !end) {
+                alert(
+                    "Mohon pilih titik awal dan tujuan terlebih dahulu!"
+                );
+                return;
+            }
+
+            if (start === end) {
+                alert(
+                    "Titik awal dan tujuan tidak boleh sama!"
+                );
+                return;
+            }
+
+            // HAPUS RUTE LAMA
+            if (routingKontrolAktif) {
+                map.removeControl(routingKontrolAktif);
+            }
+
+            if (penandaAwal) {
+                map.removeLayer(penandaAwal);
+            }
+
+            if (penandaAkhir) {
+                map.removeLayer(penandaAkhir);
+            }
+
+            infoBox.innerText =
+                "Sedang menghitung rute terbaik...";
+
+            try {
+
+                const response =
+                    await fetch(
+                        `/api/rute-terpendek?start=${start}&end=${end}`
+                    );
+
+                const res = await response.json();
+
+                if (res.status === "success") {
+
+                    // =========================================
+                    // KOORDINAT
+                    // =========================================
+                    const titikAwalKoordinat =
+                        res.koordinat[0];
+
+                    const titikAkhirKoordinat =
+                        res.koordinat[
+                            res.koordinat.length - 1
+                        ];
+
+                    // =========================================
+                    // ROUTING JALAN
+                    // =========================================
+                    routingKontrolAktif =
+                        L.Routing.control({
+
+                        waypoints: [
+                            L.latLng(
+                                titikAwalKoordinat[0],
+                                titikAwalKoordinat[1]
+                            ),
+
+                            L.latLng(
+                                titikAkhirKoordinat[0],
+                                titikAkhirKoordinat[1]
+                            )
+                        ],
+
+                        router: L.Routing.osrmv1({
+                            serviceUrl:
+                            'https://router.project-osrm.org/route/v1'
+                        }),
+
+                        lineOptions: {
+                            styles: [{
+                                color: '#ef4444',
+                                opacity: 0.9,
+                                weight: 6
+                            }]
+                        },
+
+                        createMarker: function() {
+                            return null;
+                        },
+
+                        addWaypoints: false,
+                        draggableWaypoints: false,
+                        fitSelectedRoutes: true,
+                        show: false
+
+                    }).addTo(map);
+
+                    // =========================================
+                    // MARKER AWAL
+                    // =========================================
+                    penandaAwal =
+                        L.marker(titikAwalKoordinat)
+                        .addTo(map)
+                        .bindPopup("Titik Mulai")
+                        .openPopup();
+
+                    // =========================================
+                    // MARKER AKHIR
+                    // =========================================
+                    penandaAkhir =
+                        L.marker(titikAkhirKoordinat)
+                        .addTo(map)
+                        .bindPopup("Tujuan Akhir");
+
+                    // =========================================
+                    // STATUS KAMPUS
+                    // =========================================
+                    let statusJalan = "";
+                    let tambahanMenit = 0;
+
+                    if (jam >= 7 && jam <= 8) {
+
+                        statusJalan =
+                            "Sangat Ramai (Jam Masuk Kuliah)";
+
+                        tambahanMenit = 4;
+                    }
+
+                    else if (jam >= 12 && jam <= 13) {
+
+                        statusJalan =
+                            "Ramai (Jam Istirahat)";
+
+                        tambahanMenit = 3;
+                    }
+
+                    else if (jam >= 16 && jam <= 17) {
+
+                        statusJalan =
+                            "Ramai (Jam Pulang)";
+
+                        tambahanMenit = 4;
+                    }
+
+                    else if (jam >= 18) {
+
+                        statusJalan = "Sepi";
+
+                        tambahanMenit = 1;
+                    }
+
+                    else {
+
+                        statusJalan = "Normal";
+
+                        tambahanMenit = 2;
+                    }
+
+                    // =========================================
+                    // ESTIMASI WAKTU
+                    // =========================================
+                    let estimasiMenit =
+                        Math.ceil(
+                            (res.jarak_meter / 250)
+                            + tambahanMenit
+                        );
+
+                    // MAKSIMAL 8 MENIT
+                    if (estimasiMenit > 8) {
+                        estimasiMenit = 8;
+                    }
+
+                    // =========================================
+                    // TAMPILKAN HASIL
+                    // =========================================
+                    infoBox.innerHTML = `
+
+                        <strong>
+                            Jalur Terbaik (Dijkstra Node):
+                        </strong>
+
+                        <br><br>
+
+                        ${res.rute_nama.join(' ➜ ')}
+
+                        <br><br>
+
+                        <span style="
+                            color:#10b981;
+                            font-weight:bold;
+                            font-size:18px;
+                        ">
+                            Total Jarak:
+                            ${res.jarak_meter} meter
+                        </span>
+
+                        <br><br>
+
+                        <span style="
+                            color:#2563eb;
+                            font-weight:bold;
+                            font-size:17px;
+                        ">
+                            Estimasi Waktu Tempuh:
+                            ${estimasiMenit} menit
+                        </span>
+
+                        <br><br>
+
+                        <span style="
+                            background:#facc15;
+                            color:black;
+                            padding:6px 10px;
+                            border-radius:8px;
+                            font-weight:bold;
+                            display:inline-block;
+                        ">
+                            Kondisi Kampus:
+                            ${statusJalan}
+                        </span>
+                    `;
+
+                }
+
+                else {
+
+                    infoBox.innerHTML = `
+                        <span style="color:red;">
+                            Gagal memproses rute.
+                        </span>
+                    `;
+                }
+
+            }
+
+            catch (error) {
+
+                console.error(error);
+
+                infoBox.innerHTML = `
+                    <span style="color:red;">
+                        Terjadi kesalahan koneksi ke backend server.
+                    </span>
+                `;
+            }
+        }
+
+        // =====================================================
+        // EVENT BUTTON
+        // =====================================================
+        document.getElementById('btn-cari')
+            .addEventListener('click', cariRute);
+
+    </script>
+
+</body>
+</html>
